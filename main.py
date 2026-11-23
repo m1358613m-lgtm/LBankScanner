@@ -1,166 +1,62 @@
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.clock import Clock
+https://www.lbank.com/en-US/docs/index.html
+
 import requests
-import threading
-import ssl
+import time
 
-ssl._create_default_https_context = ssl._create_unverified_context
+def get_lbank_candles(symbol="BTC/USDT", timeframe="15m", size=100):
+    """
+    دریافت کندل‌ها از LBank با اصلاح خودکار پارامترها
+    """
+    # 1. اصلاح فرمت نماد (مثلاً BTC/USDT به btc_usdt)
+    lbank_symbol = symbol.replace("/", "_").lower()
 
-class ScannerUI(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.padding = 20
-        self.spacing = 15
+    # 2. نگاشت تایم‌فریم به استاندارد LBank
+    timeframe_map = {
+        "1m": "minute1", "3m": "minute3", "5m": "minute5", "15m": "minute15", "30m": "minute30",
+        "1h": "hour1", "2h": "hour2", "4h": "hour4", "8h": "hour8", "12h": "hour12",
+        "1d": "day1", "1w": "week1"
+    }
+    lbank_type = timeframe_map.get(timeframe.lower(), timeframe)
 
-        self.status = Label(text="Status: Ready", color=(0, 1, 0, 1), font_size='16sp')
-        self.symbol_label = Label(text="Symbol: BTC/USDT", font_size='18sp')
-        
-        self.signal_label = Label(text="Waiting for scan...", font_size='24sp', bold=True)
-        self.price_label = Label(text="", font_size='18sp')
-        self.risk_label = Label(text="", font_size='16sp', color=(0.8, 0.8, 0.8, 1))
-        
-        self.btn = Button(text="SCAN MARKET NOW", size_hint_y=None, height=80, background_color=(0.1, 0.5, 0.8, 1), font_size='18sp')
-        self.btn.bind(on_press=self.scan_market)
+    # 3. اطمینان از عدد صحیح بودن حجم و رعایت محدودیت LBank (1 تا 2000)
+    try:
+        size = int(size)
+        size = min(max(size, 1), 2000)
+    except:
+        size = 100 
 
-        self.add_widget(self.status)
-        self.add_widget(self.symbol_label)
-        self.add_widget(self.signal_label)
-        self.add_widget(self.price_label)
-        self.add_widget(self.risk_label)
-        self.add_widget(self.btn)
+    # 4. ارسال درخواست به LBank
+    url = "https://api.lbank.info/v2/kline.do"
+    params = {
+        "symbol": lbank_symbol,
+        "type": lbank_type,
+        "size": size,
+        "time": int(time.time())
+    }
 
-    def scan_market(self, instance):
-        self.btn.disabled = True
-        self.signal_label.text = "Analyzing..."
-        self.signal_label.color = (1, 1, 1, 1)
-        self.price_label.text = "Connecting to LBank..."
-        self.risk_label.text = "Calculating indicators (EMA, RSI, ATR)..."
-        self.status.text = "Status: Fetching Candles..."
-        self.status.color = (1, 1, 0, 1) 
-        
-        threading.Thread(target=self.run_scanner).start()
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
 
-    def run_scanner(self):
-        try:
-            # پارامتر time کاملاً حذف شد تا LBank آخرین 50 کندل را برگرداند
-            url = "https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&size=50&type=minute15"
-            
-            response = requests.get(url, timeout=5)
-            response.raise_for_status()
-            data = response.json()
+        if "data" not in data:
+            print(f"خطای LBank: {data}")
+            return None
 
-            if "data" not in data:
-                raise Exception(f"No 'data' key. Response: {str(data)[:50]}")
-            
-            candles = data["data"]
-            
-            if not isinstance(candles, list):
-                raise Exception(f"Data is not a list. Type: {type(candles)}")
-                
-            # حالا باید 50 کندل داشته باشیم
-            if len(candles) < 30:
-                raise Exception(f"Not enough candles. Received: {len(candles)}")
+        return data["data"]
 
-            closes = [float(c[4]) for c in candles]
-            highs = [float(c[2]) for c in candles]
-            lows = [float(c[3]) for c in candles]
+    except Exception as e:
+        print(f"خطا در اتصال به LBank: {e}")
+        return None
 
-            ema_9 = self.calc_ema(closes, 9)
-            ema_21 = self.calc_ema(closes, 21)
-            rsi = self.calc_rsi(closes, 14)
-            atr = self.calc_atr(highs, lows, closes, 14)
-
-            current_price = closes[-1]
-            
-            if ema_9[-1] > ema_21[-1] and 50 < rsi[-1] < 70:
-                signal = "LONG 🟢"
-                color = (0, 1, 0, 1)
-                sl = current_price - (atr[-1] * 1.5)
-                tp = current_price + (atr[-1] * 3.0)
-            elif ema_9[-1] < ema_21[-1] and 30 < rsi[-1] < 50:
-                signal = "SHORT 🔴"
-                color = (1, 0, 0, 1)
-                sl = current_price + (atr[-1] * 1.5)
-                tp = current_price - (atr[-1] * 3.0)
-            else:
-                signal = "NEUTRAL ⚪"
-                color = (0.7, 0.7, 0.7, 1)
-                sl, tp = 0, 0
-
-            account_balance = 1000
-            risk_percent = 1.5
-            risk_amount = account_balance * (risk_percent / 100)
-            
-            if signal != "NEUTRAL ⚪":
-                position_size = risk_amount / abs(current_price - sl)
-                risk_text = f"Risk: {risk_percent}% (${risk_amount:.2f})\nSize: {position_size:.4f} BTC\nSL: ${sl:.2f} | TP: ${tp:.2f}"
-            else:
-                risk_text = "No valid setup. Conditions not met."
-
-            Clock.schedule_once(lambda dt: self.update_ui(signal, color, current_price, risk_text))
-
-        except Exception as e:
-            error_text = str(e)
-            Clock.schedule_once(lambda dt: self.show_error(error_text))
-
-    def calc_ema(self, prices, period):
-        ema = [sum(prices[:period]) / period]
-        multiplier = 2 / (period + 1)
-        for price in prices[period:]:
-            ema.append((price - ema[-1]) * multiplier + ema[-1])
-        return [ema[0]] * (period - 1) + ema
-
-    def calc_rsi(self, prices, period):
-        gains, losses = [], []
-        for i in range(1, len(prices)):
-            diff = prices[i] - prices[i-1]
-            gains.append(max(diff, 0))
-            losses.append(max(-diff, 0))
-        avg_gain = sum(gains[:period]) / period
-        avg_loss = sum(losses[:period]) / period
-        rsi = []
-        for i in range(period, len(gains)):
-            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-            rs = avg_gain / avg_loss if avg_loss != 0 else 100
-            rsi.append(100 - (100 / (1 + rs)))
-        return [50] * (period) + rsi
-
-    def calc_atr(self, highs, lows, closes, period):
-        trs = []
-        for i in range(1, len(closes)):
-            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-            trs.append(tr)
-        atr = [sum(trs[:period]) / period]
-        for tr in trs[period:]:
-            atr.append((atr[-1] * (period - 1) + tr) / period)
-        return [atr[0]] * (period) + atr
-
-    def update_ui(self, signal, color, price, risk_text):
-        self.status.text = "Status: Scan Complete"
-        self.status.color = (0, 1, 0, 1)
-        self.signal_label.text = signal
-        self.signal_label.color = color
-        self.price_label.text = f"Entry Price: ${price:,.2f}"
-        self.risk_label.text = risk_text
-        self.btn.disabled = False
-
-    def show_error(self, error_msg):
-        self.status.text = "Status: Error"
-        self.status.color = (1, 0, 0, 1)
-        self.signal_label.text = "SCAN FAILED"
-        self.price_label.text = error_msg
-        self.risk_label.text = ""
-        self.btn.disabled = False
-
-class LBankScannerApp(App):
-    def build(self):
-        self.title = 'LBank Smart Scanner'
-        return ScannerUI()
-
-if __name__ == '__main__':
-    LBankScannerApp().run()
+# ==========================================
+# نسخه جایگزین با CCXT (اگر از CCXT استفاده می‌کنید، فقط این بخش را کپی کنید)
+# ==========================================
+# import ccxt
+# def get_lbank_candles_ccxt(symbol="BTC/USDT", timeframe="15m", limit=100):
+#     exchange = ccxt.lbank()
+#     try:
+#         return exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+#     except Exception as e:
+#         print(f"خطا در CCXT: {e}")
+#         return None
