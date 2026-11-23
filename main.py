@@ -7,109 +7,165 @@ from kivy.clock import Clock
 import requests
 import threading
 
+BASE = "https://lbkperp.lbank.com/cfd/openApi/v1/pub"
 
 class ScannerUI(BoxLayout):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
         self.orientation = "vertical"
-        self.padding = 30
-        self.spacing = 20
+        self.padding = 25
+        self.spacing = 15
 
         self.status = Label(
-            text="Status: Ready",
-            color=(1, 1, 0, 1)
+            text="Status: READY",
+            color=(1, 1, 0, 1),
+            font_size="18sp"
         )
 
         self.signal = Label(
-            text="LBank Market Scanner\nReady",
-            font_size="20sp",
+            text="LBANK FUTURES SCANNER\n\nPress Check Market",
+            font_size="19sp",
             halign="center"
         )
 
-        self.risk = Label(text="Risk: Not calculated")
-
-        self.btn = Button(
-            text="Check Market",
-            size_hint_y=None,
-            height=100
+        self.details = Label(
+            text="Contracts: --\nBTCUSDT: --"
         )
 
+        self.risk = Label(text="Trading signals: Not active")
+
+        self.btn = Button(
+            text="Check Futures Market",
+            size_hint_y=None,
+            height=85
+        )
         self.btn.bind(on_press=self.refresh)
 
         self.add_widget(self.status)
         self.add_widget(self.signal)
+        self.add_widget(self.details)
         self.add_widget(self.risk)
         self.add_widget(self.btn)
 
     def refresh(self, instance):
         self.btn.disabled = True
-        self.signal.text = "Fetching live market data..."
-        self.status.text = "Status: Connecting..."
-        self.status.color = (1, 1, 0, 1)
+        self.status.text = "Status: CONNECTING FUTURES..."
+        self.signal.text = "Downloading contracts and prices..."
+        self.details.text = "Please wait..."
 
         threading.Thread(
-            target=self.get_lbank_data,
+            target=self.get_futures,
             daemon=True
         ).start()
 
-    def get_lbank_data(self):
+    def request_api(self, endpoint):
 
-        try:
-            url = "https://api.lbkex.com/v2/ticker/24hr.do"
+        response = requests.get(
+            BASE + endpoint,
+            params={"productGroup": "SwapU"},
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
 
-            response = requests.get(
-                url,
-                params={"symbol": "btc_usdt"},
-                timeout=15,
-                headers={"User-Agent": "Mozilla/5.0"}
+        response.raise_for_status()
+        result = response.json()
+
+        if not isinstance(result, dict):
+            raise ValueError("Invalid API response")
+
+        if str(result.get("result", "")).lower() != "true":
+            raise ValueError(
+                "API error: " + str(result.get("msg", result))
             )
 
-            response.raise_for_status()
+        if result.get("error_code", 0) not in (0, "0", None):
+            raise ValueError(
+                "API code: " + str(result["error_code"])
+            )
 
-            result = response.json()
+        return result
 
-            if not isinstance(result, dict):
-                raise ValueError("Invalid API response")
+    def get_futures(self):
 
-            if str(result.get("result", "")).lower() != "true":
-                raise ValueError(
-                    "LBank API rejected request: " +
-                    str(result.get("msg", "Unknown error"))
-                )
+        try:
+            # 1. Get futures contracts
+            instruments = self.request_api(
+                "/instrument"
+            )
 
-            market_data = result.get("data")
+            contracts = instruments.get("data", [])
 
-            if isinstance(market_data, list):
-                if not market_data:
-                    raise ValueError("Empty market data")
-                market_data = market_data[0]
+            if not isinstance(contracts, list):
+                raise ValueError("Invalid contracts list")
 
-            if not isinstance(market_data, dict):
-                raise ValueError("Invalid market data structure")
+            usdt_contracts = [
+                item for item in contracts
+                if isinstance(item, dict)
+                and str(item.get("symbol", "")).upper().endswith("USDT")
+                and str(item.get("clearCurrency", "")).upper() == "USDT"
+            ]
 
-            ticker = market_data.get("ticker", market_data)
+            if not usdt_contracts:
+                raise ValueError("No USDT futures contracts found")
 
-            if not isinstance(ticker, dict):
-                raise ValueError("Ticker format invalid")
+            # 2. Get futures market prices
+            markets = self.request_api(
+                "/marketData"
+            )
 
-            price = ticker.get("latest", ticker.get("last"))
-            change = ticker.get("change")
+            tickers = markets.get("data", [])
 
-            if price is None:
-                raise ValueError("BTC price not found")
+            if not isinstance(tickers, list):
+                raise ValueError("Invalid futures ticker list")
 
-            price = float(price)
+            if not tickers:
+                raise ValueError("Empty futures market data")
 
-            if change is None:
-                change_text = "Unavailable"
-            else:
-                change_text = str(change)
+            # 3. Find BTCUSDT
+            btc = next(
+                (
+                    item for item in tickers
+                    if isinstance(item, dict)
+                    and item.get("symbol", "").upper() == "BTCUSDT"
+                ),
+                None
+            )
+
+            if btc is None:
+                raise ValueError("BTCUSDT futures ticker not found")
+
+            price = btc.get("lastPrice")
+            mark = btc.get("markedPrice")
+            volume = btc.get("volume")
+            turnover = btc.get("turnover")
+
+            if price is None or float(price) <= 0:
+                raise ValueError("Invalid BTC futures price")
+
+            # 4. Rank contracts by turnover
+            ranked = sorted(
+                [
+                    x for x in tickers
+                    if isinstance(x, dict)
+                    and x.get("symbol")
+                    and x.get("turnover") is not None
+                ],
+                key=lambda x: float(x.get("turnover", 0) or 0),
+                reverse=True
+            )
+
+            top = ranked[:5]
 
             Clock.schedule_once(
                 lambda dt: self.update_success(
-                    price, change_text
+                    len(usdt_contracts),
+                    len(tickers),
+                    price,
+                    mark,
+                    volume,
+                    turnover,
+                    top
                 )
             )
 
@@ -121,18 +177,33 @@ class ScannerUI(BoxLayout):
                 lambda dt: self.update_error(error)
             )
 
-    def update_success(self, price, change):
+    def update_success(
+        self, contracts, ticker_count,
+        price, mark, volume, turnover, top
+    ):
 
-        self.status.text = "Status: LIVE DATA"
+        self.status.text = "Status: FUTURES LIVE"
         self.status.color = (0, 1, 0, 1)
 
         self.signal.text = (
-            "BTC / USDT\n\n"
-            f"Price: ${price:,.2f}\n"
-            f"24h Change: {change}%"
+            "LBANK USDT PERPETUAL\n\n"
+            f"BTCUSDT Price: {float(price):,.4f}\n"
+            f"Mark Price: {float(mark or 0):,.4f}"
         )
 
-        self.risk.text = "Risk: Not calculated"
+        self.details.text = (
+            f"USDT Contracts: {contracts}\n"
+            f"Live Tickers: {ticker_count}\n"
+            f"BTC Volume: {volume}\n"
+            f"BTC Turnover: {turnover}\n\n"
+            "TOP 5 BY TURNOVER:\n" +
+            "\n".join(
+                f"{x['symbol']}: {float(x['turnover']):,.0f}"
+                for x in top
+            )
+        )
+
+        self.risk.text = "Trading signals: Not active"
 
         self.btn.disabled = False
 
@@ -141,17 +212,16 @@ class ScannerUI(BoxLayout):
         self.status.text = "Status: ERROR"
         self.status.color = (1, 0, 0, 1)
 
-        self.signal.text = (
-            "API ERROR\n\n" + error[:250]
-        )
+        self.signal.text = "FUTURES API ERROR\n\n" + error[:250]
 
+        self.details.text = "Waiting for next test"
         self.btn.disabled = False
 
 
 class LBankScannerApp(App):
 
     def build(self):
-        self.title = "LBank Scanner"
+        self.title = "LBank Futures Scanner"
         return ScannerUI()
 
 
