@@ -24,21 +24,25 @@ jobs:
           pip install --no-cache-dir buildozer==1.5.0
           pip install --no-cache-dir cython==0.29.33
 
-      - name: Build APK (Clean)
+      - name: Build APK
         run: |
           rm -rf .buildozer
           set +e
           buildozer -v android debug > build.log 2>&1
           BUILD_STATUS=$?
-          exit $BUILD_STATUS
-
-      # این بخش لاگ را در هر شرایطی آپلود می‌کند
-      - name: Upload Build Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build-Log
-          path: build.log
+          
+          # این بخش، لاگ را مستقیماً روی صفحه Summary چاپ می‌کند
+          echo "### 🤖 نتیجه بیلد" >> $GITHUB_STEP_SUMMARY
+          echo "اگر بیلد موفق بوده، فایل APK در پایین صفحه در بخش Artifacts است." >> $GITHUB_STEP_SUMMARY
+          
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "### ❌ بیلد با خطا مواجه شد" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            # چاپ ۴۰ خط آخر لاگ مستقیماً روی صفحه
+            tail -n 40 build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
 
       - name: Upload APK
         if: success()
