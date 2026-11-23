@@ -26,12 +26,14 @@ jobs:
 
       - name: Fix SDK Tools and Licenses
         run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools
+          mkdir -p ~/.buildozer/android/platform/android-sdk
           cd ~/.buildozer/android/platform/android-sdk
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-9477386_latest.zip
-          mv cmdline-tools latest
           rm commandlinetools-linux-9477386_latest.zip
+          
+          # تغییر نام دقیق به tools (نه latest)
+          mv cmdline-tools tools
           
           mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
           echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
