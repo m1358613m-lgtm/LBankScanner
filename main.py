@@ -1,4 +1,3 @@
-
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -6,224 +5,168 @@ from kivy.uix.button import Button
 from kivy.clock import Clock
 import requests
 import threading
+import ssl
+import time
 
-BASE = "https://lbkperp.lbank.com/cfd/openApi/v1/pub"
+# نادیده گرفتن خطای SSL
+ssl._create_default_https_context = ssl._create_unverified_context
 
 class ScannerUI(BoxLayout):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.orientation = "vertical"
-        self.padding = 25
+        self.orientation = 'vertical'
+        self.padding = 20
         self.spacing = 15
 
-        self.status = Label(
-            text="Status: READY",
-            color=(1, 1, 0, 1),
-            font_size="18sp"
-        )
-
-        self.signal = Label(
-            text="LBANK FUTURES SCANNER\n\nPress Check Market",
-            font_size="19sp",
-            halign="center"
-        )
-
-        self.details = Label(
-            text="Contracts: --\nBTCUSDT: --"
-        )
-
-        self.risk = Label(text="Trading signals: Not active")
-
-        self.btn = Button(
-            text="Check Futures Market",
-            size_hint_y=None,
-            height=85
-        )
-        self.btn.bind(on_press=self.refresh)
+        # استایل تیره
+        self.status = Label(text="Status: Ready", color=(0, 1, 0, 1), font_size='16sp')
+        self.symbol_label = Label(text="Symbol: BTC/USDT", font_size='18sp')
+        
+        # بخش نمایش سیگنال
+        self.signal_label = Label(text="Waiting for scan...", font_size='24sp', bold=True)
+        self.price_label = Label(text="", font_size='18sp')
+        self.risk_label = Label(text="", font_size='18sp', color=(0.8, 0.8, 0.8, 1))
+        
+        self.btn = Button(text="SCAN MARKET NOW", size_hint_y=None, height=80, background_color=(0.1, 0.5, 0.8, 1), font_size='18sp')
+        self.btn.bind(on_press=self.scan_market)
 
         self.add_widget(self.status)
-        self.add_widget(self.signal)
-        self.add_widget(self.details)
-        self.add_widget(self.risk)
+        self.add_widget(self.symbol_label)
+        self.add_widget(self.signal_label)
+        self.add_widget(self.price_label)
+        self.add_widget(self.risk_label)
         self.add_widget(self.btn)
 
-    def refresh(self, instance):
+    def scan_market(self, instance):
         self.btn.disabled = True
-        self.status.text = "Status: CONNECTING FUTURES..."
-        self.signal.text = "Downloading contracts and prices..."
-        self.details.text = "Please wait..."
+        self.signal_label.text = "Analyzing..."
+        self.signal_label.color = (1, 1, 1, 1)
+        self.price_label.text = ""
+        self.risk_label.text = "Calculating indicators (EMA, RSI, ATR)..."
+        self.status.text = "Status: Fetching Candles..."
+        self.status.color = (1, 1, 0, 1)
+        
+        threading.Thread(target=self.run_scanner).start()
 
-        threading.Thread(
-            target=self.get_futures,
-            daemon=True
-        ).start()
-
-    def request_api(self, endpoint):
-
-        response = requests.get(
-            BASE + endpoint,
-            params={"productGroup": "SwapU"},
-            timeout=20,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-
-        response.raise_for_status()
-        result = response.json()
-
-        if not isinstance(result, dict):
-            raise ValueError("Invalid API response")
-
-        if str(result.get("result", "")).lower() != "true":
-            raise ValueError(
-                "API error: " + str(result.get("msg", result))
-            )
-
-        if result.get("error_code", 0) not in (0, "0", None):
-            raise ValueError(
-                "API code: " + str(result["error_code"])
-            )
-
-        return result
-
-    def get_futures(self):
-
+    def run_scanner(self):
         try:
-            # 1. Get futures contracts
-            instruments = self.request_api(
-                "/instrument"
-            )
+            # 1. دریافت کندل‌های 15 دقیقه‌ای (100 کندل آخر)
+            url = "https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&time=15min&size=100"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
-            contracts = instruments.get("data", [])
+            if "data" not in data or len(data["data"]) < 50:
+                raise Exception("Not enough candle data from LBank")
 
-            if not isinstance(contracts, list):
-                raise ValueError("Invalid contracts list")
+            candles = data["data"]
+            # ساختار کندل: [timestamp, open, high, low, close, volume]
+            closes = [float(c[4]) for c in candles]
+            highs = [float(c[2]) for c in candles]
+            lows = [float(c[3]) for c in candles]
 
-            usdt_contracts = [
-                item for item in contracts
-                if isinstance(item, dict)
-                and str(item.get("symbol", "")).upper().endswith("USDT")
-                and str(item.get("clearCurrency", "")).upper() == "USDT"
-            ]
+            # 2. محاسبه اندیکاتورها (بدون کتابخانه خارجی)
+            ema_9 = self.calc_ema(closes, 9)
+            ema_21 = self.calc_ema(closes, 21)
+            rsi = self.calc_rsi(closes, 14)
+            atr = self.calc_atr(highs, lows, closes, 14)
 
-            if not usdt_contracts:
-                raise ValueError("No USDT futures contracts found")
+            current_price = closes[-1]
+            
+            # 3. موتور تصمیم‌گیری
+            if ema_9[-1] > ema_21[-1] and rsi[-1] < 70 and rsi[-1] > 50:
+                signal = "LONG 🟢"
+                color = (0, 1, 0, 1)
+                sl = current_price - (atr[-1] * 1.5)
+                tp = current_price + (atr[-1] * 3.0)
+            elif ema_9[-1] < ema_21[-1] and rsi[-1] > 30 and rsi[-1] < 50:
+                signal = "SHORT 🔴"
+                color = (1, 0, 0, 1)
+                sl = current_price + (atr[-1] * 1.5)
+                tp = current_price - (atr[-1] * 3.0)
+            else:
+                signal = "NEUTRAL ⚪"
+                color = (0.7, 0.7, 0.7, 1)
+                sl = 0
+                tp = 0
 
-            # 2. Get futures market prices
-            markets = self.request_api(
-                "/marketData"
-            )
+            # 4. مدیریت ریسک (فرض بالانس 1000 دلاری و ریسک 1.5 درصد)
+            account_balance = 1000
+            risk_percent = 1.5
+            risk_amount = account_balance * (risk_percent / 100)
+            
+            if signal != "NEUTRAL ⚪":
+                position_size = risk_amount / abs(current_price - sl)
+                risk_text = f"Risk: {risk_percent}% (${risk_amount:.2f})\nSize: {position_size:.4f} BTC\nSL: ${sl:.2f} | TP: ${tp:.2f}"
+            else:
+                risk_text = "No valid setup. Conditions not met."
 
-            tickers = markets.get("data", [])
-
-            if not isinstance(tickers, list):
-                raise ValueError("Invalid futures ticker list")
-
-            if not tickers:
-                raise ValueError("Empty futures market data")
-
-            # 3. Find BTCUSDT
-            btc = next(
-                (
-                    item for item in tickers
-                    if isinstance(item, dict)
-                    and item.get("symbol", "").upper() == "BTCUSDT"
-                ),
-                None
-            )
-
-            if btc is None:
-                raise ValueError("BTCUSDT futures ticker not found")
-
-            price = btc.get("lastPrice")
-            mark = btc.get("markedPrice")
-            volume = btc.get("volume")
-            turnover = btc.get("turnover")
-
-            if price is None or float(price) <= 0:
-                raise ValueError("Invalid BTC futures price")
-
-            # 4. Rank contracts by turnover
-            ranked = sorted(
-                [
-                    x for x in tickers
-                    if isinstance(x, dict)
-                    and x.get("symbol")
-                    and x.get("turnover") is not None
-                ],
-                key=lambda x: float(x.get("turnover", 0) or 0),
-                reverse=True
-            )
-
-            top = ranked[:5]
-
-            Clock.schedule_once(
-                lambda dt: self.update_success(
-                    len(usdt_contracts),
-                    len(tickers),
-                    price,
-                    mark,
-                    volume,
-                    turnover,
-                    top
-                )
-            )
+            # 5. آپدیت UI
+            Clock.schedule_once(lambda dt: self.update_ui(signal, color, current_price, risk_text))
 
         except Exception as e:
+            error_text = str(e)
+            Clock.schedule_once(lambda dt: self.show_error(error_text))
 
-            error = str(e)
+    # --- توابع ریاضی اندیکاتورها ---
+    def calc_ema(self, prices, period):
+        ema = [sum(prices[:period]) / period]
+        multiplier = 2 / (period + 1)
+        for price in prices[period:]:
+            ema.append((price - ema[-1]) * multiplier + ema[-1])
+        # Padding to match original length
+        return [ema[0]] * (period - 1) + ema
 
-            Clock.schedule_once(
-                lambda dt: self.update_error(error)
-            )
+    def calc_rsi(self, prices, period):
+        gains, losses = [], []
+        for i in range(1, len(prices)):
+            diff = prices[i] - prices[i-1]
+            gains.append(max(diff, 0))
+            losses.append(max(-diff, 0))
+        
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+        
+        rsi = []
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+            rs = avg_gain / avg_loss if avg_loss != 0 else 100
+            rsi.append(100 - (100 / (1 + rs)))
+        return [50] * (period) + rsi
 
-    def update_success(
-        self, contracts, ticker_count,
-        price, mark, volume, turnover, top
-    ):
+    def calc_atr(self, highs, lows, closes, period):
+        trs = []
+        for i in range(1, len(closes)):
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+            trs.append(tr)
+        atr = [sum(trs[:period]) / period]
+        for tr in trs[period:]:
+            atr.append((atr[-1] * (period - 1) + tr) / period)
+        return [atr[0]] * (period) + atr
 
-        self.status.text = "Status: FUTURES LIVE"
+    # --- آپدیت رابط کاربری ---
+    def update_ui(self, signal, color, price, risk_text):
+        self.status.text = "Status: Scan Complete"
         self.status.color = (0, 1, 0, 1)
-
-        self.signal.text = (
-            "LBANK USDT PERPETUAL\n\n"
-            f"BTCUSDT Price: {float(price):,.4f}\n"
-            f"Mark Price: {float(mark or 0):,.4f}"
-        )
-
-        self.details.text = (
-            f"USDT Contracts: {contracts}\n"
-            f"Live Tickers: {ticker_count}\n"
-            f"BTC Volume: {volume}\n"
-            f"BTC Turnover: {turnover}\n\n"
-            "TOP 5 BY TURNOVER:\n" +
-            "\n".join(
-                f"{x['symbol']}: {float(x['turnover']):,.0f}"
-                for x in top
-            )
-        )
-
-        self.risk.text = "Trading signals: Not active"
-
+        self.signal_label.text = signal
+        self.signal_label.color = color
+        self.price_label.text = f"Entry Price: ${price:,.2f}"
+        self.risk_label.text = risk_text
         self.btn.disabled = False
 
-    def update_error(self, error):
-
-        self.status.text = "Status: ERROR"
+    def show_error(self, error_msg):
+        self.status.text = "Status: Error"
         self.status.color = (1, 0, 0, 1)
-
-        self.signal.text = "FUTURES API ERROR\n\n" + error[:250]
-
-        self.details.text = "Waiting for next test"
+        self.signal_label.text = "SCAN FAILED"
+        self.price_label.text = error_msg[:100]
+        self.risk_label.text = ""
         self.btn.disabled = False
-
 
 class LBankScannerApp(App):
-
     def build(self):
-        self.title = "LBank Futures Scanner"
+        self.title = 'LBank Smart Scanner'
         return ScannerUI()
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     LBankScannerApp().run()
