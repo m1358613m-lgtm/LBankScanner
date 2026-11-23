@@ -6,7 +6,6 @@ from kivy.clock import Clock
 import requests
 import threading
 import ssl
-import time # برای گرفتن زمان فعلی
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -35,41 +34,36 @@ class ScannerUI(BoxLayout):
         self.add_widget(self.btn)
 
     def scan_market(self, instance):
-        # تغییر ظاهر بلافاصله بعد از کلیک تا کاربر متوجه بشه سیستم در حال کاره
         self.btn.disabled = True
         self.signal_label.text = "Analyzing..."
         self.signal_label.color = (1, 1, 1, 1)
         self.price_label.text = "Connecting to LBank..."
         self.risk_label.text = "Calculating indicators (EMA, RSI, ATR)..."
         self.status.text = "Status: Fetching Candles..."
-        self.status.color = (1, 1, 0, 1) # زرد
+        self.status.color = (1, 1, 0, 1) 
         
-        # اجرای اسکن در پس‌زمینه
         threading.Thread(target=self.run_scanner).start()
 
     def run_scanner(self):
         try:
-            current_time = int(time.time())
+            # پارامتر time کاملاً حذف شد تا LBank آخرین 50 کندل را برگرداند
+            url = "https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&size=50&type=minute15"
             
-            # بهینه‌سازی: دریافت 50 کندل به جای 100 (سریع‌تر دانلود میشه)
-            url = f"https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&size=50&type=minute15&time={current_time}"
-            
-            # کاهش تایم‌اوت به 5 ثانیه برای جلوگیری از معطلی طولانی
             response = requests.get(url, timeout=5)
             response.raise_for_status()
             data = response.json()
 
             if "data" not in data:
-                raise Exception(f"کلید data وجود ندارد. پاسخ سرور: {str(data)[:80]}")
+                raise Exception(f"No 'data' key. Response: {str(data)[:50]}")
             
             candles = data["data"]
             
             if not isinstance(candles, list):
-                raise Exception(f"داده‌ها لیست نیستند. نوع داده: {type(candles)}")
+                raise Exception(f"Data is not a list. Type: {type(candles)}")
                 
-            # چون 50 کندل گرفتیم، حداقل رو می‌کنیم 30 کندل
+            # حالا باید 50 کندل داشته باشیم
             if len(candles) < 30:
-                raise Exception(f"کندل کافی نیست. دریافت شده: {len(candles)} کندل")
+                raise Exception(f"Not enough candles. Received: {len(candles)}")
 
             closes = [float(c[4]) for c in candles]
             highs = [float(c[2]) for c in candles]
@@ -82,7 +76,6 @@ class ScannerUI(BoxLayout):
 
             current_price = closes[-1]
             
-            # موتور تصمیم‌گیری
             if ema_9[-1] > ema_21[-1] and 50 < rsi[-1] < 70:
                 signal = "LONG 🟢"
                 color = (0, 1, 0, 1)
