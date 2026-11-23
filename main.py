@@ -6,9 +6,7 @@ from kivy.clock import Clock
 import requests
 import threading
 import ssl
-import time
 
-# نادیده گرفتن خطای SSL
 ssl._create_default_https_context = ssl._create_unverified_context
 
 class ScannerUI(BoxLayout):
@@ -18,14 +16,12 @@ class ScannerUI(BoxLayout):
         self.padding = 20
         self.spacing = 15
 
-        # استایل تیره
         self.status = Label(text="Status: Ready", color=(0, 1, 0, 1), font_size='16sp')
         self.symbol_label = Label(text="Symbol: BTC/USDT", font_size='18sp')
         
-        # بخش نمایش سیگنال
         self.signal_label = Label(text="Waiting for scan...", font_size='24sp', bold=True)
         self.price_label = Label(text="", font_size='18sp')
-        self.risk_label = Label(text="", font_size='18sp', color=(0.8, 0.8, 0.8, 1))
+        self.risk_label = Label(text="", font_size='16sp', color=(0.8, 0.8, 0.8, 1))
         
         self.btn = Button(text="SCAN MARKET NOW", size_hint_y=None, height=80, background_color=(0.1, 0.5, 0.8, 1), font_size='18sp')
         self.btn.bind(on_press=self.scan_market)
@@ -42,7 +38,7 @@ class ScannerUI(BoxLayout):
         self.signal_label.text = "Analyzing..."
         self.signal_label.color = (1, 1, 1, 1)
         self.price_label.text = ""
-        self.risk_label.text = "Calculating indicators (EMA, RSI, ATR)..."
+        self.risk_label.text = "Calculating indicators..."
         self.status.text = "Status: Fetching Candles..."
         self.status.color = (1, 1, 0, 1)
         
@@ -50,22 +46,30 @@ class ScannerUI(BoxLayout):
 
     def run_scanner(self):
         try:
-            # 1. دریافت کندل‌های 15 دقیقه‌ای (100 کندل آخر)
+            # آدرس API دریافت کندل‌ها
             url = "https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&time=15min&size=100"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
 
-            if "data" not in data or len(data["data"]) < 50:
-                raise Exception("Not enough candle data from LBank")
-
+            # بخش دیباگ: بررسی دقیق داده‌های دریافتی
+            if "data" not in data:
+                raise Exception(f"کلید data وجود ندارد. پاسخ سرور: {str(data)[:80]}")
+            
             candles = data["data"]
-            # ساختار کندل: [timestamp, open, high, low, close, volume]
+            
+            if not isinstance(candles, list):
+                raise Exception(f"داده‌ها لیست نیستند. نوع داده: {type(candles)}")
+                
+            if len(candles) < 50:
+                raise Exception(f"کندل کافی نیست. دریافت شده: {len(candles)} کندل")
+
+            # استخراج قیمت‌ها
             closes = [float(c[4]) for c in candles]
             highs = [float(c[2]) for c in candles]
             lows = [float(c[3]) for c in candles]
 
-            # 2. محاسبه اندیکاتورها (بدون کتابخانه خارجی)
+            # محاسبه اندیکاتورها
             ema_9 = self.calc_ema(closes, 9)
             ema_21 = self.calc_ema(closes, 21)
             rsi = self.calc_rsi(closes, 14)
@@ -73,13 +77,13 @@ class ScannerUI(BoxLayout):
 
             current_price = closes[-1]
             
-            # 3. موتور تصمیم‌گیری
-            if ema_9[-1] > ema_21[-1] and rsi[-1] < 70 and rsi[-1] > 50:
+            # موتور تصمیم‌گیری
+            if ema_9[-1] > ema_21[-1] and 50 < rsi[-1] < 70:
                 signal = "LONG 🟢"
                 color = (0, 1, 0, 1)
                 sl = current_price - (atr[-1] * 1.5)
                 tp = current_price + (atr[-1] * 3.0)
-            elif ema_9[-1] < ema_21[-1] and rsi[-1] > 30 and rsi[-1] < 50:
+            elif ema_9[-1] < ema_21[-1] and 30 < rsi[-1] < 50:
                 signal = "SHORT 🔴"
                 color = (1, 0, 0, 1)
                 sl = current_price + (atr[-1] * 1.5)
@@ -87,10 +91,9 @@ class ScannerUI(BoxLayout):
             else:
                 signal = "NEUTRAL ⚪"
                 color = (0.7, 0.7, 0.7, 1)
-                sl = 0
-                tp = 0
+                sl, tp = 0, 0
 
-            # 4. مدیریت ریسک (فرض بالانس 1000 دلاری و ریسک 1.5 درصد)
+            # مدیریت ریسک
             account_balance = 1000
             risk_percent = 1.5
             risk_amount = account_balance * (risk_percent / 100)
@@ -101,20 +104,17 @@ class ScannerUI(BoxLayout):
             else:
                 risk_text = "No valid setup. Conditions not met."
 
-            # 5. آپدیت UI
             Clock.schedule_once(lambda dt: self.update_ui(signal, color, current_price, risk_text))
 
         except Exception as e:
             error_text = str(e)
             Clock.schedule_once(lambda dt: self.show_error(error_text))
 
-    # --- توابع ریاضی اندیکاتورها ---
     def calc_ema(self, prices, period):
         ema = [sum(prices[:period]) / period]
         multiplier = 2 / (period + 1)
         for price in prices[period:]:
             ema.append((price - ema[-1]) * multiplier + ema[-1])
-        # Padding to match original length
         return [ema[0]] * (period - 1) + ema
 
     def calc_rsi(self, prices, period):
@@ -123,10 +123,8 @@ class ScannerUI(BoxLayout):
             diff = prices[i] - prices[i-1]
             gains.append(max(diff, 0))
             losses.append(max(-diff, 0))
-        
         avg_gain = sum(gains[:period]) / period
         avg_loss = sum(losses[:period]) / period
-        
         rsi = []
         for i in range(period, len(gains)):
             avg_gain = (avg_gain * (period - 1) + gains[i]) / period
@@ -145,7 +143,6 @@ class ScannerUI(BoxLayout):
             atr.append((atr[-1] * (period - 1) + tr) / period)
         return [atr[0]] * (period) + atr
 
-    # --- آپدیت رابط کاربری ---
     def update_ui(self, signal, color, price, risk_text):
         self.status.text = "Status: Scan Complete"
         self.status.color = (0, 1, 0, 1)
@@ -159,7 +156,8 @@ class ScannerUI(BoxLayout):
         self.status.text = "Status: Error"
         self.status.color = (1, 0, 0, 1)
         self.signal_label.text = "SCAN FAILED"
-        self.price_label.text = error_msg[:100]
+        # نمایش دقیق علت خطا
+        self.price_label.text = error_msg
         self.risk_label.text = ""
         self.btn.disabled = False
 
