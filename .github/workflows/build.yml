@@ -17,46 +17,31 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install system dependencies
+      - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev libltdl-dev libexpat1-dev
-          pip install --no-cache-dir buildozer
-          pip install --no-cache-dir "cython==0.29.33"
-
-      - name: Setup SDK & Licenses
-        run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk
-          cd ~/.buildozer/android/platform/android-sdk
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
-          mkdir -p tools
-          mv cmdline-tools/* tools/
-          rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
-          
-          yes | tools/bin/sdkmanager --licenses || true
-          tools/bin/sdkmanager "build-tools;33.0.0" "platform-tools" || true
+          pip install --no-cache-dir buildozer==1.5.0
+          pip install --no-cache-dir cython==0.29.33
 
       - name: Build APK (Clean)
         run: |
-          set +e
-          # پاک کردن کامل کش قبلی برای جلوگیری از تداخل نسخه‌ها
           rm -rf .buildozer
-          
-          echo y | buildozer -v android debug > build.log 2>&1
+          set +e
+          buildozer -v android debug > build.log 2>&1
           BUILD_STATUS=$?
-          
-          if [ $BUILD_STATUS -ne 0 ]; then
-            echo "=================================================="
-            echo "=== ❌ BUILD FAILED - THE REAL ERROR IS BELOW ==="
-            echo "=================================================="
-            # پیدا کردن خطاهای واقعی کامپایلر و چاپ ۵۰ خط آخر آن
-            grep -i -B 3 -A 10 "error:" build.log | tail -n 50 || true
-            echo "=================================================="
-            exit 1
-          fi
+          exit $BUILD_STATUS
+
+      # این بخش لاگ را در هر شرایطی آپلود می‌کند
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log
+          path: build.log
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: LBank-Scanner-APK
