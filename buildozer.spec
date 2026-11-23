@@ -8,8 +8,10 @@ version = 1.0
 requirements = python3,kivy==2.1.0,requests
 
 android.permissions = INTERNET
-android.api = 33
-android.minapi = 24
-android.ndk = 25b
+android.api = 30
+android.minapi = 21
+android.ndk = 23b
 android.archs = arm64-v8a
 android.allow_backup = True
+# این خط به سیستم می‌گوید حتما فایل APK بسازد نه AAB
+android.debug_artifact = apk
