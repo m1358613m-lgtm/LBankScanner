@@ -33,45 +33,55 @@ class ScannerUI(BoxLayout):
         self.btn.disabled = True
         self.signal.text = "Fetching data from LBank..."
         self.status.text = "Status: Connecting..."
-        self.status.color = (1, 1, 0, 1) # زرد
+        self.status.color = (1, 1, 0, 1) 
         threading.Thread(target=self.get_lbank_data).start()
 
     def get_lbank_data(self):
         try:
-            # استفاده از اندپوینت جدید و استاندارد LBank
-            url = "https://api.lbkex.com/v2/ticker/24hr.do?symbol=btc_usdt"
+            # استفاده از اندپوینت پایدار
+            url = "https://api.lbkex.com/v2/ticker.do?symbol=btc_usdt"
             
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            # بررسی امن وجود کلیدها قبل از دسترسی بهشون
-            if isinstance(data, dict) and "data" in data and len(data["data"]) > 0:
-                ticker_data = data["data"][0]
-                # در ساختار جدید، قیمت در کلید 'last' هست
-                price = ticker_data.get("last", ticker_data.get("latest", "N/A"))
-                change = ticker_data.get("change", "N/A")
+            # پیدا کردن لیست تیکرها (بررسی هر دو ساختار ممکن)
+            ticker_list = []
+            if isinstance(data, dict):
+                if "ticker" in data and isinstance(data["ticker"], list):
+                    ticker_list = data["ticker"]
+                elif "data" in data and isinstance(data["data"], list):
+                    ticker_list = data["data"]
+
+            if len(ticker_list) > 0:
+                item = ticker_list[0]
+                # جستجوی هوشمند برای کلید قیمت
+                price = item.get("latest", item.get("last", item.get("lastPrice", item.get("price", None))))
+                change = item.get("change", item.get("priceChangePercent", "0"))
                 
-                Clock.schedule_once(lambda dt: self.update_ui_success(price, change))
+                if price:
+                    Clock.schedule_once(lambda dt: self.update_ui_success(price, change))
+                else:
+                    # اگر کلید پیدا نشد، خود دیکشنری را نشان بده تا ببینیم چه خبر است
+                    Clock.schedule_once(lambda dt: self.update_ui_error(f"Keys missing: {str(item)[:100]}"))
             else:
-                Clock.schedule_once(lambda dt: self.update_ui_error("ساختار داده دریافتی نامعتبر است"))
+                Clock.schedule_once(lambda dt: self.update_ui_error(f"Unknown format: {str(data)[:100]}"))
                 
         except Exception as e:
             error_text = str(e)
-            print("ERROR:", error_text)
             Clock.schedule_once(lambda dt: self.update_ui_error(error_text))
 
     def update_ui_success(self, price, change):
         self.status.text = "Status: Live Data"
-        self.status.color = (0, 1, 0, 1) # سبز
+        self.status.color = (0, 1, 0, 1)
         self.signal.text = f"BTC/USDT\nPrice: ${price}\n24h Change: {change}%"
         self.risk.text = "Risk: 1.5% (Calculated)"
         self.btn.disabled = False
 
     def update_ui_error(self, error_msg):
         self.status.text = "Status: Error"
-        self.status.color = (1, 0, 0, 1) # قرمز
-        self.signal.text = f"Connection Failed!\n{error_msg[:100]}"
+        self.status.color = (1, 0, 0, 1)
+        self.signal.text = f"Error!\n{error_msg[:150]}"
         self.btn.disabled = False
 
 class LBankScannerApp(App):
