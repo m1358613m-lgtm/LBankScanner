@@ -8,8 +8,5 @@ version = 1.0
 requirements = python3,kivy==2.1.0,requests
 
 android.permissions = INTERNET
-android.api = 33
-android.minapi = 24
-android.ndk = 25b
 android.archs = arm64-v8a
 android.allow_backup = True
