@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -17,22 +17,21 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install system dependencies
         run: |
           sudo apt update
           sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
           pip install --no-cache-dir buildozer==1.5.0
-          # نسخه دقیق Cython که مشکل کامپایل را حل می‌کند
           pip install --no-cache-dir cython==0.29.34
 
-      - name: Set up Android SDK
+      - name: Setup SDK for Buildozer
         run: |
           mkdir -p ~/.buildozer/android/platform/android-sdk
           cd ~/.buildozer/android/platform/android-sdk
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-9477386_latest.zip
           mkdir -p tools
-          mv cmdline-tools/* tools/ || true
+          mv cmdline-tools/* tools/ 2>/dev/null || true
           rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
           
           mkdir -p licenses
@@ -47,8 +46,9 @@ jobs:
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -ne 0 ]; then
             echo "=== ❌ BUILD FAILED ==="
-            echo "=== HERE IS THE EXACT ERROR (LAST 50 LINES) ==="
-            tail -n 50 build.log
+            echo "=== KEY ERROR SUMMARY ==="
+            # این خط فقط خطاهای اصلی رو فیلتر می‌کنه
+            grep -i -E "error:|exception|failed|fatal" build.log | tail -n 30
             exit 1
           fi
 
