@@ -21,23 +21,8 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
-          pip install --no-cache-dir buildozer==1.5.0
-          pip install --no-cache-dir cython==0.29.34
-
-      - name: Setup SDK for Buildozer
-        run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk
-          cd ~/.buildozer/android/platform/android-sdk
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
-          mkdir -p tools
-          mv cmdline-tools/* tools/ 2>/dev/null || true
-          rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
-          
-          mkdir -p licenses
-          echo -e "\nd56f5187479451eabf01fb78af6dfcb131a6481e" > licenses/android-sdk-license
-          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" >> licenses/android-sdk-license
-          echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" > licenses/android-sdk-preview-license
+          pip install --no-cache-dir buildozer
+          pip install --no-cache-dir "cython<3.0"
 
       - name: Build APK
         run: |
@@ -45,10 +30,11 @@ jobs:
           buildozer -v android debug > build.log 2>&1
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -ne 0 ]; then
-            echo "=== ❌ BUILD FAILED ==="
-            echo "=== KEY ERROR SUMMARY ==="
-            # این خط فقط خطاهای اصلی رو فیلتر می‌کنه
-            grep -i -E "error:|exception|failed|fatal" build.log | tail -n 30
+            echo "=================================================="
+            echo "=== ❌ BUILD FAILED - EXACT ERROR BELOW ==="
+            echo "=================================================="
+            # این خط دقیقاً خطای اصلی رو پیدا و چاپ می‌کنه
+            grep -i -B 2 -A 5 "Command failed" build.log | tail -n 30
             exit 1
           fi
 
