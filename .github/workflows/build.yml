@@ -22,11 +22,11 @@ jobs:
           sudo apt update
           sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev libltdl-dev libexpat1-dev
           pip install --no-cache-dir buildozer==1.5.0
-          pip install --no-cache-dir cython==0.29.33
+          # نسخه دقیق Cython که با Kivy 2.3.0 و پایتون 3.10 سازگار است
+          pip install --no-cache-dir cython==0.29.36
 
-      - name: Pre-install Android SDK & Build Tools (Bypass Buildozer Bug)
+      - name: Pre-install Android SDK & Build Tools
         run: |
-          # ساخت مسیری که Buildozer انتظار دارد
           export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
           mkdir -p $ANDROID_HOME
           cd $ANDROID_HOME
@@ -37,10 +37,7 @@ jobs:
           mv cmdline-tools/* tools/
           rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
           
-          # تایید خودکار لایسنس‌ها
           yes | tools/bin/sdkmanager --licenses || true
-          
-          # نصب اجباری build-tools قبل از اجرای Buildozer
           tools/bin/sdkmanager "build-tools;33.0.0" "platforms;android-33" "platform-tools" || true
 
       - name: Build APK
@@ -53,8 +50,7 @@ jobs:
           if [ $BUILD_STATUS -ne 0 ]; then
             echo "### ❌ بیلد با خطا مواجه شد" >> $GITHUB_STEP_SUMMARY
             echo '```text' >> $GITHUB_STEP_SUMMARY
-            # این دستور فقط خطاهای اصلی را پیدا و چاپ می‌کند، نه متغیرها را
-            grep -i -E "error|failed|exception|aidl" build.log | tail -n 20 >> $GITHUB_STEP_SUMMARY
+            grep -i -E "error|failed|exception|aidl|modulenotfound" build.log | tail -n 30 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
