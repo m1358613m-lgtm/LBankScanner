@@ -6,6 +6,7 @@ from kivy.clock import Clock
 import requests
 import threading
 import ssl
+import time # برای گرفتن زمان فعلی
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -34,25 +35,30 @@ class ScannerUI(BoxLayout):
         self.add_widget(self.btn)
 
     def scan_market(self, instance):
+        # تغییر ظاهر بلافاصله بعد از کلیک تا کاربر متوجه بشه سیستم در حال کاره
         self.btn.disabled = True
         self.signal_label.text = "Analyzing..."
         self.signal_label.color = (1, 1, 1, 1)
-        self.price_label.text = ""
-        self.risk_label.text = "Calculating indicators..."
+        self.price_label.text = "Connecting to LBank..."
+        self.risk_label.text = "Calculating indicators (EMA, RSI, ATR)..."
         self.status.text = "Status: Fetching Candles..."
-        self.status.color = (1, 1, 0, 1)
+        self.status.color = (1, 1, 0, 1) # زرد
         
+        # اجرای اسکن در پس‌زمینه
         threading.Thread(target=self.run_scanner).start()
 
     def run_scanner(self):
         try:
-            # آدرس API دریافت کندل‌ها
-            url = "https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&time=15min&size=100"
-            response = requests.get(url, timeout=10)
+            current_time = int(time.time())
+            
+            # بهینه‌سازی: دریافت 50 کندل به جای 100 (سریع‌تر دانلود میشه)
+            url = f"https://api.lbkex.com/v2/kline.do?symbol=btc_usdt&size=50&type=minute15&time={current_time}"
+            
+            # کاهش تایم‌اوت به 5 ثانیه برای جلوگیری از معطلی طولانی
+            response = requests.get(url, timeout=5)
             response.raise_for_status()
             data = response.json()
 
-            # بخش دیباگ: بررسی دقیق داده‌های دریافتی
             if "data" not in data:
                 raise Exception(f"کلید data وجود ندارد. پاسخ سرور: {str(data)[:80]}")
             
@@ -61,15 +67,14 @@ class ScannerUI(BoxLayout):
             if not isinstance(candles, list):
                 raise Exception(f"داده‌ها لیست نیستند. نوع داده: {type(candles)}")
                 
-            if len(candles) < 50:
+            # چون 50 کندل گرفتیم، حداقل رو می‌کنیم 30 کندل
+            if len(candles) < 30:
                 raise Exception(f"کندل کافی نیست. دریافت شده: {len(candles)} کندل")
 
-            # استخراج قیمت‌ها
             closes = [float(c[4]) for c in candles]
             highs = [float(c[2]) for c in candles]
             lows = [float(c[3]) for c in candles]
 
-            # محاسبه اندیکاتورها
             ema_9 = self.calc_ema(closes, 9)
             ema_21 = self.calc_ema(closes, 21)
             rsi = self.calc_rsi(closes, 14)
@@ -93,7 +98,6 @@ class ScannerUI(BoxLayout):
                 color = (0.7, 0.7, 0.7, 1)
                 sl, tp = 0, 0
 
-            # مدیریت ریسک
             account_balance = 1000
             risk_percent = 1.5
             risk_amount = account_balance * (risk_percent / 100)
@@ -156,7 +160,6 @@ class ScannerUI(BoxLayout):
         self.status.text = "Status: Error"
         self.status.color = (1, 0, 0, 1)
         self.signal_label.text = "SCAN FAILED"
-        # نمایش دقیق علت خطا
         self.price_label.text = error_msg
         self.risk_label.text = ""
         self.btn.disabled = False
