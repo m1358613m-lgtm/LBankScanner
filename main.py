@@ -6,9 +6,8 @@ from kivy.clock import Clock
 import requests
 import threading
 import ssl
-import traceback
 
-# نادیده گرفتن خطای SSL در اندروید (برای اینکه برنامه کرش نکنه)
+# نادیده گرفتن خطای SSL در اندروید
 ssl._create_default_https_context = ssl._create_unverified_context
 
 class ScannerUI(BoxLayout):
@@ -34,43 +33,44 @@ class ScannerUI(BoxLayout):
         self.btn.disabled = True
         self.signal.text = "Fetching data from LBank..."
         self.status.text = "Status: Connecting..."
-        self.status.color = (1, 1, 0, 1) # زرد شدن وضعیت
-        
+        self.status.color = (1, 1, 0, 1) # زرد
         threading.Thread(target=self.get_lbank_data).start()
 
     def get_lbank_data(self):
         try:
-            # آدرس API عمومی
-            url = "https://api.lbkex.com/v2/ticker.do?symbol=btc_usdt" 
+            # استفاده از اندپوینت جدید و استاندارد LBank
+            url = "https://api.lbkex.com/v2/ticker/24hr.do?symbol=btc_usdt"
+            
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            if data.get("result") == "true" and len(data["ticker"]) > 0:
-                ticker = data["ticker"][0]
-                price = ticker["latest"]
-                change = ticker["change"]
+            # بررسی امن وجود کلیدها قبل از دسترسی بهشون
+            if isinstance(data, dict) and "data" in data and len(data["data"]) > 0:
+                ticker_data = data["data"][0]
+                # در ساختار جدید، قیمت در کلید 'last' هست
+                price = ticker_data.get("last", ticker_data.get("latest", "N/A"))
+                change = ticker_data.get("change", "N/A")
+                
                 Clock.schedule_once(lambda dt: self.update_ui_success(price, change))
             else:
-                Clock.schedule_once(lambda dt: self.update_ui_error("Invalid data from LBank"))
+                Clock.schedule_once(lambda dt: self.update_ui_error("ساختار داده دریافتی نامعتبر است"))
                 
         except Exception as e:
-            # اینجا خطا رو به متن تبدیل میکنیم تا پایتون 3 اون رو پاک نکنه
             error_text = str(e)
             print("ERROR:", error_text)
             Clock.schedule_once(lambda dt: self.update_ui_error(error_text))
 
     def update_ui_success(self, price, change):
         self.status.text = "Status: Live Data"
-        self.status.color = (0, 1, 0, 1) # سبز شدن
+        self.status.color = (0, 1, 0, 1) # سبز
         self.signal.text = f"BTC/USDT\nPrice: ${price}\n24h Change: {change}%"
         self.risk.text = "Risk: 1.5% (Calculated)"
         self.btn.disabled = False
 
     def update_ui_error(self, error_msg):
         self.status.text = "Status: Error"
-        self.status.color = (1, 0, 0, 1) # قرمز شدن
-        # نمایش 100 کاراکتر اول خطا برای اینکه در صفحه جا بشه
+        self.status.color = (1, 0, 0, 1) # قرمز
         self.signal.text = f"Connection Failed!\n{error_msg[:100]}"
         self.btn.disabled = False
 
