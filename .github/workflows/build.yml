@@ -24,13 +24,8 @@ jobs:
           pip install --no-cache-dir buildozer
           pip install --no-cache-dir "cython==0.29.33"
 
-      - name: Accept Android SDK Licenses and Install Build-Tools
+      - name: Setup SDK & Licenses
         run: |
-          # غیرفعال کردن حالت تعاملی برای پذیرش خودکار لایسنس‌ها
-          export APP_ANDROID_ACCEPT_SDK_LICENSE=1
-          export BUILDOZER_WARN_ON_ROOT=0
-          
-          # ساخت مسیر SDK و دانلود ابزارهای خط فرمان
           mkdir -p ~/.buildozer/android/platform/android-sdk
           cd ~/.buildozer/android/platform/android-sdk
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
@@ -39,23 +34,25 @@ jobs:
           mv cmdline-tools/* tools/
           rm -rf cmdline-tools commandlinetools-linux-9477386_latest.zip
           
-          # تایید خودکار تمام لایسنس‌ها با دستور yes
-          yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses || true
-          
-          # نصب صریح build-tools و platform-tools
-          ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager "build-tools;33.0.0" "platform-tools" || true
+          yes | tools/bin/sdkmanager --licenses || true
+          tools/bin/sdkmanager "build-tools;33.0.0" "platform-tools" || true
 
-      - name: Build APK
+      - name: Build APK (Clean)
         run: |
           set +e
-          # استفاده از echo y برای پاسخ خودکار به هرگونه درخواست تایید احتمالی
+          # پاک کردن کامل کش قبلی برای جلوگیری از تداخل نسخه‌ها
+          rm -rf .buildozer
+          
           echo y | buildozer -v android debug > build.log 2>&1
           BUILD_STATUS=$?
+          
           if [ $BUILD_STATUS -ne 0 ]; then
             echo "=================================================="
-            echo "=== ❌ BUILD FAILED - EXACT ERROR BELOW ==="
+            echo "=== ❌ BUILD FAILED - THE REAL ERROR IS BELOW ==="
             echo "=================================================="
-            tail -n 50 build.log
+            # پیدا کردن خطاهای واقعی کامپایلر و چاپ ۵۰ خط آخر آن
+            grep -i -B 3 -A 10 "error:" build.log | tail -n 50 || true
+            echo "=================================================="
             exit 1
           fi
 
